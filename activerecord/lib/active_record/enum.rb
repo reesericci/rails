@@ -119,6 +119,13 @@ module ActiveRecord
   #     enum :status, [ :active, :archived ], instance_methods: false
   #   end
   #
+  # If you want to disable the auto-generated methods on the model class, you can do
+  # so by setting the +:class_methods+ option to false:
+  #
+  #   class Conversation < ActiveRecord::Base
+  #     enum :status, [ :active, :archived ], class_methods: false
+  #   end
+  #
   # If you want the enum value to be validated before saving, use the option +:validate+:
   #
   #   class Conversation < ActiveRecord::Base
@@ -219,7 +226,7 @@ module ActiveRecord
         return _enum(name, values, **options)
       end
 
-      definitions = options.slice!(:_prefix, :_suffix, :_scopes, :_default, :_instance_methods)
+      definitions = options.slice!(:_prefix, :_suffix, :_scopes, :_default, :_instance_methods, :_class_methods)
       options.transform_keys! { |key| :"#{key[1..-1]}" }
 
       definitions.each { |name, values| _enum(name, values, **options) }
@@ -238,7 +245,7 @@ module ActiveRecord
         super
       end
 
-      def _enum(name, values, prefix: nil, suffix: nil, scopes: true, instance_methods: true, validate: false, **options)
+      def _enum(name, values, prefix: nil, suffix: nil, scopes: true, instance_methods: true, class_methods: true, validate: false, **options)
         assert_valid_enum_definition_values(values)
         assert_valid_enum_options(options)
         # statuses = { }
@@ -246,8 +253,10 @@ module ActiveRecord
         name = name.to_s
 
         # def self.statuses() statuses end
-        detect_enum_conflict!(name, name.pluralize, true)
-        singleton_class.define_method(name.pluralize) { enum_values }
+        detect_enum_conflict!(name, name.pluralize, true, class_methods: class_methods)
+        if class_methods
+          singleton_class.define_method(name.pluralize) { enum_values }
+        end
         defined_enums[name] = enum_values
 
         detect_enum_conflict!(name, name)
@@ -283,14 +292,14 @@ module ActiveRecord
 
             value_method_name = "#{prefix}#{label}#{suffix}"
             value_method_names << value_method_name
-            define_enum_methods(name, value_method_name, value, scopes, instance_methods)
+            define_enum_methods(name, value_method_name, value, scopes, instance_methods, class_methods)
 
             method_friendly_label = label.gsub(/[\W&&[:ascii:]]+/, "_")
             value_method_alias = "#{prefix}#{method_friendly_label}#{suffix}"
 
             if value_method_alias != value_method_name && !value_method_names.include?(value_method_alias)
               value_method_names << value_method_alias
-              define_enum_methods(name, value_method_alias, value, scopes, instance_methods)
+              define_enum_methods(name, value_method_alias, value, scopes, instance_methods, class_methods)
             end
           end
         end
@@ -384,10 +393,10 @@ module ActiveRecord
         "by %{source}."
       private_constant :ENUM_CONFLICT_MESSAGE
 
-      def detect_enum_conflict!(enum_name, method_name, klass_method = false)
-        if klass_method && dangerous_class_method?(method_name)
+      def detect_enum_conflict!(enum_name, method_name, klass_method = false, class_methods: true)
+        if klass_method && class_methods && dangerous_class_method?(method_name)
           raise_conflict_error(enum_name, method_name, type: "class")
-        elsif klass_method && method_defined_within?(method_name, Relation)
+        elsif klass_method && class_methods && method_defined_within?(method_name, Relation)
           raise_conflict_error(enum_name, method_name, type: "class", source: Relation.name)
         elsif klass_method && method_name.to_sym == :id
           raise_conflict_error(enum_name, method_name)
